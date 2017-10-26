@@ -53,7 +53,7 @@ mkdir ALIGNMENT/
 for file in `ls *.NoAdapt.Trim.fastq.gz`
 do
 outputname=`basename $file | sed -e "s/.NoAdapt.Trim.fastq.gz/_OUTPUT/"`
-STAR --runThreadN 14 --genomeDir /PATH/Genomes/UCSC/hg38_STAR/ --readFilesIn $file --readFilesCommand zcat --sjdbGTFfile /PATH/Genomes/UCSC/hg38_STAR/gencode.v24.annotation.gtf --outFilterType BySJout --outFilterMultimapNmax 10 --alignSJoverhangMin 10 --alignSJDBoverhangMin 1 --outSAMtype BAM SortedByCoordinate --outSAMunmapped Within --outFilterMismatchNmax 3 --twopassMode Basic --outFileNamePrefix ALIGNMENT/$outputname
+STAR --runThreadN 14 --genomeDir /U5/Stefano/Genomes/UCSC/hg38_STAR/ --readFilesIn $file --readFilesCommand zcat --sjdbGTFfile /U5/Stefano/Genomes/UCSC/hg38/gencode.v24.annotation.gtf --outFilterType BySJout --outFilterMismatchNmax 999 --outFilterMismatchNoverReadLmax 0.04 --outFilterMultimapNmax 10 --alignSJoverhangMin 10 --alignSJDBoverhangMin 1 --outSAMtype BAM SortedByCoordinate --outSAMunmapped Within --outFilterMismatchNmax 3 --twopassMode Basic --outFileNamePrefix ALIGNMENT/$outputname --chimSegmentMin 15 --chimScoreMin 15 --chimScoreSeparation 10 --chimJunctionOverhangMin 15 --quantMode TranscriptomeSAM
 echo $outputname
 done
 
@@ -130,10 +130,39 @@ head -n -5 $file > "$newname"
 echo $file
 echo $newname
 done
-
 mv *.txt HTSEQ/
+
+## Track files both strand
+# Need hg38.chrom.sizes file and .pl script
+fetchChromSizes hg38 > hg38.chrom.sizes
+for i in *.UNIQUE.bam
+do 
+makeTagDirectory $i"TagDir" $i -keepAll
+makeUCSCfile $i"TagDir" -o $i"TagDir"/$i'.POS.bedGraph' -fsize 1e50 -res 10 -norm 1e7 -strand -
+makeUCSCfile $i"TagDir" -o $i"TagDir"/$i'.NEG.bedGraph' -fsize 1e50 -res 10 -norm 1e7 -strand +
+cd $i"TagDir"
+gunzip -c $i'.NEG.bedGraph'.gz | awk '{printf "%s\t%s\t%s\t-%s\n", $1, $2, $3, $4}' > $i'.NEG.bedGraph'
+gunzip -c $i'.POS.bedGraph'.gz | awk '{printf "%s\t%s\t%s\t+%s\n", $1, $2, $3, $4}' > $i'.POS.bedGraph' 
+perl /U3/stefano/SCRIPTS/removeOutOfBoundsReadsFixed.pl $i'.POS.bedGraph' hg38 -chromSizes ../hg38.chrom.sizes > $i'.POS.fix.bedGraph'
+perl /U3/stefano/SCRIPTS/removeOutOfBoundsReadsFixed.pl $i'.NEG.bedGraph' hg38 -chromSizes ../hg38.chrom.sizes > $i'.NEG.fix.bedGraph'
+bedGraphToBigWig $i'.POS.fix.bedGraph' ../hg38.chrom.sizes $i.for.bw
+bedGraphToBigWig $i'.NEG.fix.bedGraph' ../hg38.chrom.sizes $i.rev.bw
+rm *.bedGraph
+rm *.bedGraph.gz
+cd ..
+done
+
+rm *.ex.bam
+rm *.in.bam
+mkdir TRACKS/
+mv *TagDir* TRACKS/
+mkdir FASTQ/
+mv *.fastq.gz FASTQ/
+mkdir FASTQC/
+mv *_fastqc* FASTQC/
+mkdir BAMS/
+mv *.bam BAMS/
 
 # print end date and time again
 date
-#------------------------------------
-
+#--------------------
