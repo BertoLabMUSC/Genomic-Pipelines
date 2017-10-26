@@ -4,7 +4,7 @@
 #$ -S /bin/bash
 # assume current working directory as paths
 #$ -cwd
-#$ -N STAR_SE_HUMAN
+#$ -N BWA_HUMAN_HG38_ChIP-seq
 #
 # print start date and time
 date
