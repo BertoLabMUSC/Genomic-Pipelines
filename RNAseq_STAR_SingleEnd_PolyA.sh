@@ -33,6 +33,10 @@ date
 # Download STAR aligner (for RNA-seq). 
 # STAR --runMode genomeGenerate --genomeDir hg38_STAR/ --genomeFastaFiles hg38_STAR/*.fa --runThreadN 13 --sjdbGTFfile hg38/gencode.v24.annotation.gtf --sjdbOverhang 75
 
+# Paths to the genome directories
+DBDIR = /U5/Stefano/Genomes/UCSC/hg38_STAR_GencodeV27/
+RSEMDIR = /U5/Stefano/Genomes/UCSC/hg38_RSEM_GencodeV27/hg38
+
 ## Quality control with fastqc
 ls *.fastq.gz | xargs -P 24 fastqc -t 10
 
@@ -52,25 +56,35 @@ done
 mkdir ALIGNMENT/
 for file in `ls *.NoAdapt.Trim.fastq.gz`
 do
-outputname=`basename $file | sed -e "s/.NoAdapt.Trim.fastq.gz/_OUTPUT/"`
-STAR --runThreadN 14 --genomeDir /U5/Stefano/Genomes/UCSC/hg38_STAR/ --readFilesIn $file --readFilesCommand zcat --sjdbGTFfile /U5/Stefano/Genomes/UCSC/hg38/gencode.v24.annotation.gtf --outFilterType BySJout --outFilterMismatchNmax 999 --outFilterMismatchNoverReadLmax 0.04 --outFilterMultimapNmax 10 --alignSJoverhangMin 10 --alignSJDBoverhangMin 1 --outSAMtype BAM SortedByCoordinate --outSAMunmapped Within --outFilterMismatchNmax 3 --twopassMode Basic --outFileNamePrefix ALIGNMENT/$outputname --chimSegmentMin 15 --chimScoreMin 15 --chimScoreSeparation 10 --chimJunctionOverhangMin 15 --quantMode TranscriptomeSAM
+outputname=`basename $file | sed -e "s/.NoAdapt.Trim.fastq.gz//"`
+STAR --runThreadN 14 \
+--genomeDir $DBDIR \
+--readFilesIn $file \
+--readFilesCommand zcat \
+--sjdbGTFfile $DBDIR/gencode.v27.annotation.gtf \
+--outFilterType BySJout  \
+--outFilterMismatchNoverReadLmax 0.04 \
+--outFilterMultimapNmax 10 \
+--alignSJoverhangMin 10 \
+--alignSJDBoverhangMin 1 \
+--outSAMtype BAM SortedByCoordinate \
+--outSAMunmapped Within \
+--outFilterMismatchNmax 3 \
+--twopassMode Basic \
+--outFileNamePrefix ALIGNMENT/$outputname \
+--chimSegmentMin 15 \
+--chimScoreMin 15 \
+--chimScoreSeparation 10 \
+--chimJunctionOverhangMin 15 \
+--quantMode TranscriptomeSAM
 echo $outputname
 done
 
 mv ALIGNMENT/*.out.bam ./
 
-# Get a list of multi-mapped reads
-mkdir MULTIMAPPEDREADS/
-for file in `ls *_R1_001_OUTPUTAligned.sortedByCoord.out.bam`
-do
-outputname=`basename $file | sed -e "s/_OUTPUTAligned.sortedByCoord.out.bam/.MultiMappedReads.txt/"`
-samtools view $file | grep -v NH:i:1 | perl -pe 's/AS.+(NH:i:\d+)/\$1/' | cut -f1,10,12 | perl -pe 's/NH:i://' | sort -u -k3,3nr > MULTIMAPPEDREADS/"$outputname"
-echo $outputname
-done
-
 # Fetch only primary alignment (remove unmapped,chimeric etc etc)
-find . -name "*_OUTPUTAligned.sortedByCoord.out.bam" | xargs -n 1 -P 12 -iFILES sh -c 'samtools view -F 256 -b FILES > FILES.PRIMARY.bam;'; 
-rename s/_OUTPUTAligned.sortedByCoord.out.bam\// *.PRIMARY.bam
+find . -name "*Aligned.sortedByCoord.out.bam" | xargs -n 1 -P 12 -iFILES sh -c 'samtools view -F 256 -b FILES > FILES.PRIMARY.bam;'; 
+rename s/Aligned.sortedByCoord.out.bam\// *.PRIMARY.bam
 mv *.out.bam ALIGNMENT/
 
 # Split Primary alignment in rRNA (in.bam) and non rRNA (ex.bam).
@@ -78,7 +92,7 @@ mv *.out.bam ALIGNMENT/
 for file in `ls *.PRIMARY.bam`
 do
 samname=`basename $file | sed -e "s/.PRIMARY.bam//"`
-split_bam.py -i $file -r /PATH/Genomes/UCSC/hg38_STAR/GRCh38_rRNA.bed -o "$samname"
+split_bam.py -i $file -r $DBDIR/GRCh38_rRNA.bed -o "$samname"
 echo $samname
 done
 
@@ -104,7 +118,7 @@ mkdir COVERAGE/
 for file in `ls *.UNIQUE.bam`
 do
 newname=`basename $file | sed -e "s/.bam//"`
-geneBody_coverage.py -i $file -r /PATH/Genomes/UCSC/hg38_STAR/hg38_UCSC_knownGene.bed -o COVERAGE/"$newname"
+geneBody_coverage.py -i $file -r $DBDIR/hg38_UCSC_knownGene.bed -o COVERAGE/"$newname"
 echo $file
 echo $newname
 done
@@ -112,7 +126,7 @@ done
 # Read Distribution
 # You need the hg38_UCSC_knownGene.bed from RseqQC data base
 mkdir DISTRIBUTION/
-find . -name "*.UNIQUE.bam" | xargs -n 1 -P 4 -iFILES sh -c 'read_distribution.py -i FILES -r /PATH/Genomes/UCSC/hg38_STAR/hg38_UCSC_knownGene.bed > DISTRIBUTION/FILES.DistributionLog.txt;';
+find . -name "*.UNIQUE.bam" | xargs -n 1 -P 4 -iFILES sh -c 'read_distribution.py -i FILES -r $DBDIR/hg38_UCSC_knownGene.bed > DISTRIBUTION/FILES.DistributionLog.txt;';
 rename s/UNIQUE.bam\// DISTRIBUTION/*.txt
   
 ##HTseq-count
@@ -120,7 +134,7 @@ rename s/UNIQUE.bam\// DISTRIBUTION/*.txt
 # Change the -s option based on the RNA seq data you have
 # Change the -t option based on the RNA seq data (polyA = exon, Total RNA = gene)
 mkdir HTSEQ/
-parallel -j 14 'samtools view {} | htseq-count -m intersection-strict -t exon -i gene_name -s reverse - /PATH/Genomes/UCSC/hg38_STAR/genecode_hg38_protein.coding.gtf > {.}.txt' ::: *.UNIQUE.bam
+parallel -j 14 'samtools view {} | htseq-count -m intersection-strict -t exon -i gene_name -s reverse - $DBDIR/gencode.v27.protein_coding.gtf > {.}.txt' ::: *.UNIQUE.bam
 
 # Remove list lines from HTseq count
 for file in `ls *.txt`
@@ -131,6 +145,18 @@ echo $file
 echo $newname
 done
 mv *.txt HTSEQ/
+
+# RSEM quantification
+mv ALIGNMENT/*.toTranscriptome.out.bam ./
+mkdir RSEM/
+for file in `ls *Aligned.toTranscriptome.out.bam`
+do
+newname=`basename $file | sed -e "s/Aligned.toTranscriptome.out.bam/.rsem/"`
+rsem-calculate-expression --bam --estimate-rspd  --calc-ci --no-bam-output --seed 12345 -p 14 --ci-memory 30000 --forward-prob 0 $file $RSEMDIR RSEM/"$newname" 
+echo $file
+echo $newname
+done
+mv *.toTranscriptome.out.bam ALIGNMENT/
 
 ## Track files both strand
 # Need hg38.chrom.sizes file and .pl script
